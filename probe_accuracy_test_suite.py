@@ -56,6 +56,8 @@ class Probe():
         self.isKlicky = False
         self.isKlippain = False
         self.isTap = False
+        self.isDockableProbe = False
+        self.config = self.printer.config.get("probe", None)
 
         self._detect()
 
@@ -64,6 +66,7 @@ class Probe():
                 self.isKlicky
             or  self.isKlippain
             or  self.isTap
+            or  self.isDockableProbe
         )
 
     def lock(self, lock = True):
@@ -74,6 +77,9 @@ class Probe():
                 self.printer.gcode("ACTIVATE_PROBE LOCK=true")
             else:
                 self.printer.gcode("ACTIVATE_PROBE")
+        elif self.isDockableProbe:
+            self.printer.gcode("SET_DOCKABLE_PROBE AUTO_ATTACH_DETACH=0")
+            self.printer.gcode("ATTACH_PROBE")
 
     def unlock(self, unlock = False):
         if self.isKlicky:
@@ -83,6 +89,12 @@ class Probe():
                 self.printer.gcode("DEACTIVATE_PROBE UNLOCK=true")
             else:
                 self.printer.gcode("DEACTIVATE_PROBE")
+        elif self.isDockableProbe:
+            self.printer.gcode("DETACH_PROBE")
+            auto_attach_detach = self.config.get("auto_attach_detach", True)
+            self.printer.gcode(
+                f"SET_DOCKABLE_PROBE AUTO_ATTACH_DETACH={1 if auto_attach_detach else 0}"
+            )
 
     def check_error(msg):
         klicky_macro_issue = " ".join([
@@ -120,6 +132,15 @@ class Probe():
                     self.isKlippain = True
                     print(f"{ CLEAR_LINE }Probe type: Klippain mode detected")
                     return
+        except:
+            pass
+
+        try:
+            dockable_probe = self.printer.config["dockable_probe"]
+            self.config = dockable_probe
+            self.isDockableProbe = True
+            print(f"{ CLEAR_LINE }Probe type: Danger Klipper dockable_probe mode detected")
+            return
         except:
             pass
 
@@ -280,6 +301,10 @@ class Printer:
                         .get("z_hop", None)
                 )
 
+            elif self.probe.isDockableProbe:
+                self.safe_z = (
+                    self.probe.config.get("z_hop", None)
+                )
             if not self.safe_z:
                 print(
                     "Safe z has not been set in klicky-variables",
@@ -314,8 +339,8 @@ class Printer:
         return (x, y)
 
     def _get_bed_corners(self) -> List:
-        x_offset = self.config["probe"].get("x_offset", 0)
-        y_offset = self.config["probe"].get("y_offset", 0)
+        x_offset = self.probe.config.get("x_offset", 0)
+        y_offset = self.probe.config.get("y_offset", 0)
 
         xmin, ymin = re.findall(r"[\d.]+", self.config["bed_mesh"]["mesh_min"])
         xmax, ymax = re.findall(r"[\d.]+", self.config["bed_mesh"]["mesh_max"])
@@ -640,7 +665,7 @@ class Test_suite():
             sys.exit(1)
 
         if (
-                self.printer.config["probe"].get("drop_first_result") == "True"
+            self.printer.probe.config.get("drop_first_result") == "True"
             and not keep_first
         ):
             data.pop(0)
@@ -663,9 +688,8 @@ class Test_suite():
 
 
     def _summarize_repeatability(self, testframe):
-        probe_config = self.printer.config["probe"]
 
-        agg_method = probe_config.get("samples_result")
+        agg_method =  self.printer.probe.config.get("samples_result")
         agg_method = "mean" if agg_method != "median" else "median"
 
         n = testframe["sample_index"].drop_duplicates().shape[0]
